@@ -62,5 +62,51 @@ class EnableBankingItemsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to "https://api.enablebanking.com/auth/redirect/abc"
     assert_nil flash[:alert]
     assert_equal "DECOUPLED", @item.reload.aspsp_auth_approach
+    assert_equal "decoupled_app", @item.selected_auth_method
+  end
+
+  test "select_auth_method lists the bank's authentication methods" do
+    Provider::EnableBanking.any_instance.stubs(:get_aspsps).returns(
+      aspsps: [
+        {
+          name: "VR Bank in Holstein", country: "DE", bic: "GENODEF1PIN", psu_types: [ "personal" ],
+          auth_methods: [
+            { name: "PUSH_OTP", title: "SecureGo Plus", approach: "DECOUPLED", psu_type: "personal" },
+            { name: "CHIP_OTP", title: "chipTAN", approach: "DECOUPLED", psu_type: "personal" }
+          ]
+        }
+      ]
+    )
+
+    get select_auth_method_enable_banking_item_url(@item), params: { aspsp_name: "VR Bank in Holstein" }
+
+    assert_response :success
+    assert_match "SecureGo Plus", @response.body
+    assert_match "chipTAN", @response.body
+  end
+
+  test "authorize honors the user-chosen auth_method" do
+    Provider::EnableBanking.any_instance.stubs(:get_aspsps).returns(
+      aspsps: [
+        {
+          name: "VR Bank in Holstein", country: "DE", psu_types: [ "personal" ],
+          auth_methods: [
+            { name: "PUSH_OTP", approach: "DECOUPLED", psu_type: "personal" },
+            { name: "CHIP_OTP", approach: "DECOUPLED", psu_type: "personal" }
+          ]
+        }
+      ]
+    )
+    Provider::EnableBanking.any_instance.stubs(:start_authorization).returns(
+      url: "https://api.enablebanking.com/auth/redirect/xyz",
+      authorization_id: "auth_2"
+    )
+
+    post authorize_enable_banking_item_url(@item),
+         params: { aspsp_name: "VR Bank in Holstein", psu_type: "personal", auth_method: "CHIP_OTP" }
+
+    assert_redirected_to "https://api.enablebanking.com/auth/redirect/xyz"
+    assert_equal "CHIP_OTP", @item.reload.selected_auth_method
+    assert_equal "DECOUPLED", @item.aspsp_auth_approach
   end
 end

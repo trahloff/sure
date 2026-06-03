@@ -1,0 +1,20 @@
+<%# locals: (aspsp:) %>
+<% if aspsp[:logo].present? %>
+  <img src="<%= aspsp[:logo] %>" alt="<%= aspsp[:name] %>" class="w-10 h-10 rounded object-contain">
+<% else %>
+  <div class="w-10 h-10 rounded bg-container-inset flex items-center justify-center">
+    <%= icon "building-bank", class: "w-5 h-5 text-tertiary" %>
+  </div>
+<% end %>
+<div class="flex-1 min-w-0">
+  <div class="flex items-center gap-2 flex-wrap">
+    <p class="font-medium text-sm text-primary"><%= aspsp[:name] %></p>
+    <% if aspsp[:beta] %>
+      <%= render DS::Pill.new(label: t("enable_banking_items.select_bank.beta_label", default: "Beta"), tone: :warning, marker: false) %>
+    <% end %>
+  </div>
+  <% if aspsp[:bic].present? %>
+    <p class="text-xs text-secondary truncate">BIC: <%= aspsp[:bic] %></p>
+  <% end %>
+</div>
+<%= icon "chevron-right", class: "w-5 h-5 text-secondary flex-shrink-0" %>

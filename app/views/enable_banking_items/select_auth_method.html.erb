@@ -1,0 +1,52 @@
+<%= turbo_frame_tag "modal" do %>
+  <%= render DS::Dialog.new do |dialog| %>
+    <% dialog.with_header(title: t(".title", default: "Choose how to sign in")) %>
+
+    <% dialog.with_body do %>
+      <%= styled_form_with url: authorize_enable_banking_item_path(@enable_banking_item),
+                           method: :post,
+                           data: { turbo: false },
+                           class: "space-y-4" do |form| %>
+        <p class="text-sm text-secondary">
+          <%= t(".description", bank: @aspsp_name, default: "Select the authentication method you use with %{bank}.") %>
+        </p>
+
+        <%= form.hidden_field :aspsp_name, value: @aspsp_name %>
+        <%= form.hidden_field :psu_type, value: @psu_type %>
+        <% if @new_connection.present? %>
+          <%= form.hidden_field :new_connection, value: @new_connection %>
+        <% end %>
+
+        <% if @auth_methods.present? %>
+          <div class="space-y-2 max-h-80 overflow-y-auto">
+            <% @auth_methods.each_with_index do |method, index| %>
+              <label class="flex items-center gap-3 p-3 rounded-lg border border-primary bg-container hover:bg-subtle transition-colors cursor-pointer">
+                <%= form.radio_button :auth_method, method[:name], checked: index.zero?, class: "text-primary focus:ring-primary" %>
+                <span class="flex-1 min-w-0">
+                  <span class="block font-medium text-sm text-primary"><%= method[:title] %></span>
+                  <span class="block text-xs text-secondary"><%= method[:approach].to_s.titleize %></span>
+                </span>
+              </label>
+            <% end %>
+          </div>
+        <% else %>
+          <div class="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+            <%= t(".unavailable", default: "Couldn't load authentication methods for this bank. Please try again.") %>
+          </div>
+        <% end %>
+
+        <div class="flex justify-end gap-2 pt-4">
+          <%= render DS::Link.new(
+                text: t(".cancel", default: "Cancel"),
+                variant: :secondary,
+                href: settings_providers_path,
+                data: { turbo_frame: "_top", action: "DS--dialog#close" }
+              ) %>
+          <% if @auth_methods.present? %>
+            <%= form.submit t(".continue", default: "Continue") %>
+          <% end %>
+        </div>
+      <% end %>
+    <% end %>
+  <% end %>
+<% end %>

@@ -27,32 +27,24 @@
             autofocus>
 
           <div class="space-y-2 max-h-80 overflow-y-auto">
+            <% row_class = "w-full flex items-center gap-4 p-3 rounded-lg border border-primary bg-container hover:bg-subtle transition-colors text-left" %>
             <% @aspsps.each do |aspsp| %>
               <div data-bank-search-target="item" data-bank-search="<%= [ aspsp[:name], aspsp[:bic] ].compact_blank.join(" ").downcase(:fold) %>">
-                <%= button_to authorize_enable_banking_item_path(@enable_banking_item),
-                              method: :post,
-                              params: { aspsp_name: aspsp[:name], new_connection: @new_connection },
-                              class: "w-full flex items-center gap-4 p-3 rounded-lg border border-primary bg-container hover:bg-subtle transition-colors text-left",
-                              data: { turbo: false } do %>
-                  <% if aspsp[:logo].present? %>
-                    <img src="<%= aspsp[:logo] %>" alt="<%= aspsp[:name] %>" class="w-10 h-10 rounded object-contain">
-                  <% else %>
-                    <div class="w-10 h-10 rounded bg-container-inset flex items-center justify-center">
-                      <%= icon "building-bank", class: "w-5 h-5 text-tertiary" %>
-                    </div>
+                <% if @enable_banking_item.auth_method_options(aspsp, "personal").size > 1 %>
+                  <%# Multiple authentication methods — let the user choose on the next step %>
+                  <%= link_to select_auth_method_enable_banking_item_path(@enable_banking_item, aspsp_name: aspsp[:name], new_connection: @new_connection),
+                              class: row_class,
+                              data: { turbo_frame: "modal" } do %>
+                    <%= render "enable_banking_items/bank_row", aspsp: aspsp %>
                   <% end %>
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <p class="font-medium text-sm text-primary"><%= aspsp[:name] %></p>
-                      <% if aspsp[:beta] %>
-                        <%= render DS::Pill.new(label: t(".beta_label", default: "Beta"), tone: :warning, marker: false) %>
-                      <% end %>
-                    </div>
-                    <% if aspsp[:bic].present? %>
-                      <p class="text-xs text-secondary truncate">BIC: <%= aspsp[:bic] %></p>
-                    <% end %>
-                  </div>
-                  <%= icon "chevron-right", class: "w-5 h-5 text-secondary flex-shrink-0" %>
+                <% else %>
+                  <%= button_to authorize_enable_banking_item_path(@enable_banking_item),
+                                method: :post,
+                                params: { aspsp_name: aspsp[:name], new_connection: @new_connection },
+                                class: row_class,
+                                data: { turbo: false } do %>
+                    <%= render "enable_banking_items/bank_row", aspsp: aspsp %>
+                  <% end %>
                 <% end %>
               </div>
             <% end %>

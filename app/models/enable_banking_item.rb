@@ -68,7 +68,7 @@ class EnableBankingItem < ApplicationRecord
   # @param language [String, nil] Two-letter language code
   # @return [String] Redirect URL for the user
   def start_authorization(aspsp_name:, redirect_url:, state: nil, psu_type: "personal",
-                          aspsp_data: nil, language: nil)
+                          aspsp_data: nil, language: nil, auth_method: nil)
     provider = enable_banking_provider
     raise StandardError.new("Enable Banking provider is not configured") unless provider
 
@@ -90,13 +90,14 @@ class EnableBankingItem < ApplicationRecord
         psu_type
       end
 
-      selected_method = select_auth_method(aspsp_data, validated_psu_type)
+      selected_method = select_auth_method(aspsp_data, validated_psu_type, preferred: auth_method)
 
       update!(
         aspsp_required_psu_headers: aspsp_data[:required_psu_headers] || [],
         aspsp_maximum_consent_validity: aspsp_data[:maximum_consent_validity],
         aspsp_auth_approach: selected_method&.dig(:approach),
-        aspsp_psu_types: aspsp_types
+        aspsp_psu_types: aspsp_types,
+        selected_auth_method: selected_method&.dig(:name)
       )
     end
 
@@ -108,7 +109,7 @@ class EnableBankingItem < ApplicationRecord
       psu_type: validated_psu_type,
       maximum_consent_validity: aspsp_maximum_consent_validity,
       language: language,
-      auth_method: selected_method&.dig(:name)
+      auth_method: selected_method&.dig(:name) || auth_method || selected_auth_method
     )
 
     attributes = {
@@ -128,7 +129,7 @@ class EnableBankingItem < ApplicationRecord
   # re-fetch — rather than caching the full ASPSP object in the session — keeps
   # us under the 4KB session cookie limit.
   # @return [String] Redirect URL for the user
-  def begin_authorization!(redirect_url:, state:, language: nil, psu_type: nil, aspsp_name: nil)
+  def begin_authorization!(redirect_url:, state:, language: nil, psu_type: nil, aspsp_name: nil, auth_method: nil)
     name = aspsp_name.presence || self.aspsp_name
     raise StandardError.new("No bank selected for this connection") if name.blank?
 
@@ -138,7 +139,8 @@ class EnableBankingItem < ApplicationRecord
       state: state,
       psu_type: psu_type.presence || self.psu_type || "personal",
       aspsp_data: fetch_aspsp_data(name),
-      language: language
+      language: language,
+      auth_method: auth_method
     )
   end
 
@@ -340,6 +342,23 @@ class EnableBankingItem < ApplicationRecord
     end
   end
 
+  # Selectable auth methods for a PSU type, de-duplicated by name (ASPSPs list the
+  # same method once per psu_type). Each entry: { name:, approach:, title: }.
+  # Drives the method picker; an empty/one-element result means there is nothing
+  # to choose and the auto-selected method is used.
+  def auth_method_options(aspsp_data, psu_type)
+    candidate_auth_methods(aspsp_data, psu_type).each_with_object([]) do |m, acc|
+      next if acc.any? { |x| x[:name] == m[:name] }
+      acc << { name: m[:name], approach: m[:approach], title: m[:title].presence || m[:name].to_s.titleize }
+    end
+  end
+
+  # Fetch ASPSP metadata for a bank by name and return its selectable auth methods.
+  def available_auth_methods(aspsp_name, psu_type)
+    data = fetch_aspsp_data(aspsp_name)
+    data ? auth_method_options(data, psu_type) : []
+  end
+
   private
 
     # Authentication approach preference, lowest number wins.
@@ -348,29 +367,35 @@ class EnableBankingItem < ApplicationRecord
     # / chipTAN). EMBEDDED is last resort (handled by the hosted page too).
     AUTH_APPROACH_PRIORITY = { "REDIRECT" => 0, "DECOUPLED" => 1, "EMBEDDED" => 2 }.freeze
 
-    # Choose the best authentication method for the given PSU type.
-    # Returns a hash with :name and :approach, or nil when the ASPSP exposes no
-    # API-selectable methods (Enable Banking then falls back to its default).
-    def select_auth_method(aspsp_data, psu_type)
-      methods = Array(aspsp_data[:auth_methods]).map(&:with_indifferent_access)
-      return nil if methods.empty?
+    # Choose the authentication method to use for the given PSU type.
+    # Honors an explicit `preferred` method name when the ASPSP offers it (used by
+    # the method picker); otherwise auto-selects by approach priority
+    # (REDIRECT > DECOUPLED > EMBEDDED). Returns { name:, approach: }, or nil when
+    # the ASPSP exposes no API-selectable methods (Enable Banking falls back to its default).
+    def select_auth_method(aspsp_data, psu_type, preferred: nil)
+      candidates = candidate_auth_methods(aspsp_data, psu_type)
+      return nil if candidates.empty?
 
-      # Hidden methods aren't surfaced on Enable Banking's hosted page, so we don't
-      # auto-select one (the PSU couldn't complete it). If every method is hidden,
-      # return nil and let /auth fall back to the ASPSP's default rather than
-      # forcing a non-selectable method.
-      methods = methods.reject { |m| ActiveModel::Type::Boolean.new.cast(m[:hidden_method]) }
-      return nil if methods.empty?
-
-      # Prefer methods that match the chosen PSU type; if none declare a psu_type
-      # (or none match), consider all of them.
-      matching = methods.select { |m| m[:psu_type].blank? || m[:psu_type].to_s == psu_type.to_s }
-      candidates = matching.presence || methods
+      if preferred.present?
+        chosen = candidates.find { |m| m[:name].to_s == preferred.to_s }
+        return { name: chosen[:name], approach: chosen[:approach] } if chosen
+      end
 
       best = candidates.min_by { |m| AUTH_APPROACH_PRIORITY.fetch(m[:approach].to_s, 99) }
-      return nil unless best
+      best && { name: best[:name], approach: best[:approach] }
+    end
 
-      { name: best[:name], approach: best[:approach] }
+    # Selectable auth methods applicable to the PSU type. Hidden methods aren't
+    # surfaced on Enable Banking's hosted page, so we exclude them entirely (rather
+    # than falling back to them): the picker won't offer them, and for auto-selection
+    # an all-hidden ASPSP yields [] so /auth uses the ASPSP default.
+    def candidate_auth_methods(aspsp_data, psu_type)
+      methods = Array(aspsp_data[:auth_methods]).map(&:with_indifferent_access)
+      methods = methods.reject { |m| ActiveModel::Type::Boolean.new.cast(m[:hidden_method]) }
+      return [] if methods.empty?
+
+      matching = methods.select { |m| m[:psu_type].blank? || m[:psu_type].to_s == psu_type.to_s }
+      matching.presence || methods
     end
 
     # Fetch the ASPSP object for a given name from the provider's /aspsps list.

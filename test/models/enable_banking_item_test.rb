@@ -82,6 +82,53 @@ class EnableBankingItemTest < ActiveSupport::TestCase
     assert_nil @item.send(:select_auth_method, aspsp, "personal")
   end
 
+  test "select_auth_method honors a valid preferred method over the priority pick" do
+    aspsp = {
+      auth_methods: [
+        { name: "WEB", approach: "REDIRECT" },
+        { name: "CHIP_OTP", approach: "DECOUPLED" }
+      ]
+    }.with_indifferent_access
+
+    selected = @item.send(:select_auth_method, aspsp, "personal", preferred: "CHIP_OTP")
+
+    assert_equal "CHIP_OTP", selected[:name]
+  end
+
+  test "select_auth_method falls back to auto-select when preferred is unknown" do
+    aspsp = {
+      auth_methods: [
+        { name: "PUSH_OTP", approach: "DECOUPLED" },
+        { name: "WEB", approach: "REDIRECT" }
+      ]
+    }.with_indifferent_access
+
+    selected = @item.send(:select_auth_method, aspsp, "personal", preferred: "DOES_NOT_EXIST")
+
+    assert_equal "WEB", selected[:name]
+  end
+
+  test "auth_method_options dedupes repeated names and includes a human title" do
+    aspsp = {
+      auth_methods: [
+        { name: "PUSH_OTP", approach: "DECOUPLED", title: "SecureGo Plus" },
+        { name: "PUSH_OTP", approach: "DECOUPLED", title: "SecureGo Plus" },
+        { name: "CHIP_OTP", approach: "DECOUPLED", title: "chipTAN" }
+      ]
+    }.with_indifferent_access
+
+    opts = @item.auth_method_options(aspsp, "personal")
+
+    assert_equal [ "PUSH_OTP", "CHIP_OTP" ], opts.map { |o| o[:name] }
+    assert_equal "SecureGo Plus", opts.first[:title]
+  end
+
+  test "auth_method_options titleizes the name when no title is provided" do
+    aspsp = { auth_methods: [ { name: "SMS_OTP", approach: "DECOUPLED" } ] }.with_indifferent_access
+
+    assert_equal "Sms Otp", @item.auth_method_options(aspsp, "personal").first[:title]
+  end
+
   test "reconcile_session_expiry! updates session_expires_at from access.valid_until" do
     @item.session_id = "sess"
     @item.session_expires_at = 1.day.from_now

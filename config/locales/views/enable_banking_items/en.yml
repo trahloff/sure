@@ -100,6 +100,12 @@ en:
     reauthorize:
       invalid_redirect: The authorization URL received is invalid. Please try again.
       reauthorization_failed: Reauthorization failed
+    select_auth_method:
+      title: Choose how to sign in
+      description: Select the authentication method you use with %{bank}.
+      unavailable: Couldn't load authentication methods for this bank. Please try again.
+      cancel: Cancel
+      continue: Continue
     select_bank:
       beta_label: Beta
       cancel: Cancel

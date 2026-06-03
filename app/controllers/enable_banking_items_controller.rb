@@ -1,7 +1,7 @@
 class EnableBankingItemsController < ApplicationController
   include EnableBankingItems::MapsHelper
-  before_action :set_enable_banking_item, only: [ :update, :destroy, :sync, :select_bank, :authorize, :reauthorize, :setup_accounts, :complete_account_setup, :new_connection ]
-  before_action :require_admin!, only: [ :new, :create, :link_accounts, :select_existing_account, :link_existing_account, :update, :destroy, :sync, :select_bank, :authorize, :reauthorize, :setup_accounts, :complete_account_setup, :new_connection ]
+  before_action :set_enable_banking_item, only: [ :update, :destroy, :sync, :select_bank, :select_auth_method, :authorize, :reauthorize, :setup_accounts, :complete_account_setup, :new_connection ]
+  before_action :require_admin!, only: [ :new, :create, :link_accounts, :select_existing_account, :link_existing_account, :update, :destroy, :sync, :select_bank, :select_auth_method, :authorize, :reauthorize, :setup_accounts, :complete_account_setup, :new_connection ]
   skip_before_action :verify_authenticity_token, only: [ :callback ]
 
   def new
@@ -121,10 +121,29 @@ class EnableBankingItemsController < ApplicationController
     render layout: false
   end
 
+  # Let the user choose among a bank's authentication methods (e.g. SecureGo push,
+  # chipTAN, photoTAN, smsTAN). Only reached for banks that expose more than one
+  # selectable method; single-method banks go straight to #authorize.
+  def select_auth_method
+    @aspsp_name = params[:aspsp_name]
+    @new_connection = params[:new_connection]
+    @psu_type = params[:psu_type].presence || "personal"
+
+    unless @aspsp_name.present?
+      redirect_to settings_providers_path, alert: t("enable_banking_items.authorize.bank_required", default: "Please select a bank.")
+      return
+    end
+
+    @auth_methods = @enable_banking_item.available_auth_methods(@aspsp_name, @psu_type)
+
+    render layout: false
+  end
+
   # Initiate authorization for a selected bank
   def authorize
-    aspsp_name = params[:aspsp_name]
-    psu_type   = params[:psu_type].presence || "personal"
+    aspsp_name  = params[:aspsp_name]
+    psu_type    = params[:psu_type].presence || "personal"
+    auth_method = params[:auth_method].presence
 
     unless aspsp_name.present?
       redirect_to settings_providers_path, alert: t(".bank_required", default: "Please select a bank.")
@@ -148,15 +167,17 @@ class EnableBankingItemsController < ApplicationController
 
       language = I18n.locale.to_s.split("-").first
 
-      # begin_authorization! re-fetches ASPSP metadata and auto-selects the best
-      # auth method (REDIRECT > DECOUPLED > EMBEDDED). Decoupled/MFA banks proceed
-      # through Enable Banking's hosted SCA page rather than being blocked.
+      # begin_authorization! re-fetches ASPSP metadata and selects the auth method:
+      # the user's explicit choice when provided (the method picker), otherwise the
+      # best by priority (REDIRECT > DECOUPLED > EMBEDDED). Decoupled/MFA banks
+      # proceed through Enable Banking's hosted SCA page rather than being blocked.
       redirect_url = target_item.begin_authorization!(
         aspsp_name: aspsp_name,
         redirect_url: enable_banking_callback_url,
         state: target_item.id,
         psu_type: psu_type,
-        language: language
+        language: language,
+        auth_method: auth_method
       )
 
       safe_redirect_to_enable_banking(

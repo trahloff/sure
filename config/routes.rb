@@ -153,6 +153,7 @@ Rails.application.routes.draw do
     member do
       post :sync
       get :select_bank
+      get :select_auth_method
       post :authorize
       post :reauthorize
       get :setup_accounts
